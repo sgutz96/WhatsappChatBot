@@ -1,21 +1,26 @@
 {
   "name": "bot-adina",
   "version": "1.0.0",
-  "main": "index.js",
+  "description": "Bot de WhatsApp especializado en osos de anteojos",
+  "main": "bot-adina.js",
+  "type": "commonjs",
   "scripts": {
+    "start": "node bot-adina.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
+  "keywords": [
+    "whatsapp",
+    "bot",
+    "ollama",
+    "oso-de-anteojos",
+    "conservacion"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@google/generative-ai": "^0.24.1",
-    "axios": "^1.10.0",
-    "puppeteer": "^24.25.0",
     "qrcode-terminal": "^0.12.0",
     "whatsapp-web.js": "^1.34.1"
   },
-  "description": "🐻 Adina: Bióloga Virtual Especialista en Osos de Anteojos\r Adina es una bot educativa conversacional desarrollada con WhatsApp Web.js, potenciada por Ollama AI, que responde preguntas sobre el oso de anteojos (Tremarctos ornatus) con datos científicos y un toque de entusiasmo naturalista.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/sgutz96/WhatsappChatBot.git"

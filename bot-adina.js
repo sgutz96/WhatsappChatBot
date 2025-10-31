@@ -1,342 +1,413 @@
+// ===========================================
+// 🤖 BOT DE WHATSAPP - ADINA LA BIÓLOGA 🐻
+// ===========================================
+
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
+const fs = require('fs');
 
-// Crear cliente de WhatsApp
-const client = new Client({
-    authStrategy: new LocalAuth()
-});
+// ======================
+// 🔍 VERIFICAR SESIÓN
+// ======================
+const cookiesPath = './.wwebjs_auth/session-adina-oso-bot-stable/Default/Cookies';
+try {
+  fs.accessSync(cookiesPath);
+} catch {
+  console.log('⚠️ Archivo de cookies no encontrado, continuará sin sesión previa.');
+}
 
-// Configuración de Ollama
-const OLLAMA_CONFIG = {
-    url: 'http://localhost:11434/api/generate',
-    model: 'llama3.2',
-    maxTokens: 250
+const CONFIG = {
+    keepAliveInterval: 30 * 60 * 1000, // Ping cada 30 min
+    maxReconnectAttempts: 5,
+    reconnectDelay: 5000, // 5 seg entre intentos
+    rateLimitDelay: 2000  // 2 seg entre mensajes
 };
 
-// Base de conocimientos sobre el Oso de Anteojos
-const CONOCIMIENTO_OSO_ANTEOJOS = {
-    nombre_cientifico: "Tremarctos ornatus",
-    nombres_comunes: ["Oso de anteojos", "Oso andino", "Oso frontino", "Ukumari", "Ukuku"],
-    habitat: {
-        region: "Andes de Sudamérica",
-        paises: ["Venezuela", "Colombia", "Ecuador", "Perú", "Bolivia", "norte de Argentina"],
-        ecosistemas: ["Bosques nublados", "Páramos", "Bosques secos", "Punas"],
-        altitud: "500 a 4,750 metros sobre el nivel del mar"
-    },
-    caracteristicas_fisicas: {
-        peso_macho: "100-200 kg",
-        peso_hembra: "35-82 kg",
-        longitud: "1.2-2 metros",
-        pelaje: "Negro con manchas amarillas/cremas alrededor de los ojos y pecho",
-        esperanza_vida: "20-25 años en vida silvestre, hasta 36 en cautiverio"
-    },
-    comportamiento: {
-        actividad: "Principalmente diurno",
-        tipo_social: "Solitario, excepto madres con crías",
-        alimentacion: "Omnívoro con tendencia herbívora (90% vegetales)",
-        hibernacion: "No hiberna"
-    },
-    alimentacion: {
-        plantas: ["Bromelias", "Frutos de palma", "Bambú", "Orquídeas"],
-        frutas: ["Aguacatillo", "Mortino", "Uvilla"],
-        otros: ["Insectos", "Pequeños mamíferos", "Miel", "Corteza de árboles"]
-    },
-    reproduccion: {
-        gestacion: "6-8 meses",
-        crias_por_camada: "1-3 oseznos",
-        edad_independencia: "8-10 meses",
-        madurez_sexual: "4-7 años"
-    },
-    conservacion: {
-        estado: "Vulnerable (UICN)",
-        poblacion_estimada: "2,500-10,000 individuos",
-        principales_amenazas: [
-            "Deforestación y fragmentación del hábitat",
-            "Conflicto con comunidades locales",
-            "Caza ilegal",
-            "Cambio climático",
-            "Minería y expansión agrícola"
-        ]
-    },
-    importancia_cultural: {
-        mitologia: "Considerado sagrado por culturas andinas como los Incas",
-        simbolismo: "Representa la conexión entre la tierra y el cielo",
-        leyendas: "Protagonista de múltiples leyendas andinas sobre la creación"
-    },
-    datos_curiosos: [
-        "Es el único oso nativo de Sudamérica",
-        "Construye nidos en los árboles para dormir y descansar",
-        "Puede trepar árboles de hasta 50 metros de altura",
-        "Sus 'anteojos' son únicos en cada individuo, como huellas dactilares",
+let reconnectAttempts = 0;
+let isReconnecting = false;
+let ultimoMensajeEnviado = Date.now();
+
+console.log('🔍 Verificando sesiones anteriores...');
+const authPath = '.wwebjs_auth';
+if (fs.existsSync(authPath)) {
+    console.log('✅ Sesión previa encontrada - reconectando automáticamente...');
+} else {
+    console.log('📱 Primera vez - necesitarás escanear el código QR');
+}
+
+// ======================
+// 💬 CLIENTE WHATSAPP
+// ======================
+const client = new Client({
+    authStrategy: new LocalAuth({
+        clientId: "adina-oso-bot-stable"
+    }),
+    puppeteer: {
+        headless: true,
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu',
+            '--disable-web-security'
+        ],
+        timeout: 0
+    }
+});
+
+// ======================
+// 🧠 CONFIGURACIÓN OLLAMA
+// ======================
+const OLLAMA_CONFIG = {
+    url: 'http://localhost:11434/api/generate',
+    model: 'llama3.2:latest',
+    maxTokens: 150
+};
+
+// ======================
+// 🐻 BASE DE CONOCIMIENTOS
+// ======================
+const OSO_ANTEOJOS = {
+    info_basica: "Los osos de anteojos (Tremarctos ornatus) son los únicos osos nativos de Sudamérica",
+    habitat: "Viven en los Andes desde Venezuela hasta Argentina, entre 500-4,750m de altitud",
+    dieta: "Omnívoros pero 90% vegetarianos: bromelias, bambú, frutos, ocasionalmente insectos",
+    conservacion: "Vulnerables: solo 2,500-10,000 individuos por deforestación y caza",
+    curiosidades: [
+        "Construyen nidos en árboles de hasta 50 metros de altura",
+        "Sus 'anteojos' amarillos son únicos como huellas dactilares",
         "Son excelentes dispersores de semillas en el ecosistema andino",
-        "Pueden caminar en dos patas para obtener mejor visión"
+        "No hibernan como otros osos del mundo",
+        "Pueden caminar en dos patas para tener mejor vista"
     ]
 };
 
-// Almacenar conversaciones por usuario
-let conversacionesActivas = {};
-
-// Función para obtener la fecha actual
-function obtenerFechaHoy() {
-    const hoy = new Date();
-    return hoy.toDateString();
-}
-
-// Función para limpiar conversaciones antiguas (más de 24 horas)
-function limpiarConversacionesAntiguas() {
-    const fechaHoy = obtenerFechaHoy();
-    
-    for (let numero in conversacionesActivas) {
-        if (conversacionesActivas[numero].fecha !== fechaHoy) {
-            delete conversacionesActivas[numero];
-        }
-    }
-}
-
-// Función para detectar temas relacionados con osos de anteojos
-function detectarTemaOsoAnteojos(mensaje) {
-    const palabrasClave = [
-        'oso', 'osos', 'anteojos', 'andino', 'tremarctos', 'ukumari', 'ukuku',
-        'frontino', 'andes', 'sudamerica', 'colombia', 'ecuador', 'peru',
-        'bolivia', 'venezuela', 'bosque', 'paramo', 'conservacion',
-        'animal', 'animales', 'fauna', 'vida silvestre', 'especie',
-        'mamifero', 'vulnerable', 'extincion', 'habitat'
+// ======================
+// 🧩 FUNCIONES AUXILIARES
+// ======================
+function esTemaOso(mensaje) {
+    const keywords = [
+        'oso', 'osos', 'anteojos', 'andino', 'tremarctos',
+        'animal', 'animales', 'fauna', 'conservacion', 'extincion'
     ];
-    
-    const mensajeLower = mensaje.toLowerCase();
-    return palabrasClave.some(palabra => mensajeLower.includes(palabra));
+    const textoLower = mensaje.toLowerCase();
+    return keywords.some(word => textoLower.includes(word));
 }
 
-// Función para obtener información relevante del dataset
-function obtenerInfoRelevante(mensaje) {
-    const mensajeLower = mensaje.toLowerCase();
-    let infoRelevante = [];
-    
-    // Detectar qué tipo de información busca
-    if (mensajeLower.includes('habitat') || mensajeLower.includes('vive') || mensajeLower.includes('donde')) {
-        infoRelevante.push(`Viven en los Andes de Sudamérica, desde Venezuela hasta Argentina, entre 500 y 4,750 metros de altitud.`);
-    }
-    
-    if (mensajeLower.includes('comida') || mensajeLower.includes('alimenta') || mensajeLower.includes('come')) {
-        infoRelevante.push(`Son omnívoros pero 90% de su dieta son vegetales: bromelias, frutos, bambú, y ocasionalmente insectos.`);
-    }
-    
-    if (mensajeLower.includes('peso') || mensajeLower.includes('tamaño') || mensajeLower.includes('grande')) {
-        infoRelevante.push(`Los machos pesan 100-200kg y las hembras 35-82kg. Miden entre 1.2-2 metros.`);
-    }
-    
-    if (mensajeLower.includes('peligro') || mensajeLower.includes('extincion') || mensajeLower.includes('amenaza')) {
-        infoRelevante.push(`Están en estado Vulnerable. Solo quedan entre 2,500-10,000 individuos por deforestación y caza.`);
-    }
-    
-    if (mensajeLower.includes('curiosidad') || mensajeLower.includes('curioso') || mensajeLower.includes('interesante')) {
-        const curiosidades = CONOCIMIENTO_OSO_ANTEOJOS.datos_curiosos;
-        const curiosidadAleatoria = curiosidades[Math.floor(Math.random() * curiosidades.length)];
-        infoRelevante.push(curiosidadAleatoria);
-    }
-    
-    return infoRelevante.join(' ');
-}
-
-// Función para generar respuesta con IA y contexto
-async function generarRespuestaIA(mensajeUsuario, nombreUsuario = 'Usuario', historial = []) {
+async function generarRespuesta(mensaje, nombreUsuario = 'Usuario') {
     try {
-        // Detectar si el tema está relacionado con osos de anteojos
-        const esTemateRelevante = detectarTemaOsoAnteojos(mensajeUsuario);
-        const infoRelevante = obtenerInfoRelevante(mensajeUsuario);
-        
-        // Construir contexto de la conversación
-        let contextoConversacion = '';
-        if (historial.length > 0) {
-            contextoConversacion = '\n\nHistorial de conversación reciente:\n';
-            historial.slice(-4).forEach((msg, index) => {
-                contextoConversacion += `${msg.sender}: ${msg.text}\n`;
-            });
+        const esOso = esTemaOso(mensaje);
+        let contextoEspecializado = '';
+
+        if (esOso) {
+            const curiosidad = OSO_ANTEOJOS.curiosidades[
+                Math.floor(Math.random() * OSO_ANTEOJOS.curiosidades.length)
+            ];
+            contextoEspecializado = `
+INFORMACIÓN OSO DE ANTEOJOS:
+- ${OSO_ANTEOJOS.info_basica}
+- ${OSO_ANTEOJOS.habitat}
+- ${OSO_ANTEOJOS.conservacion}
+- Curiosidad: ${curiosidad}
+`;
         }
 
-        let personalidadEspecializada = '';
-        if (esTemateRelevante || infoRelevante) {
-            personalidadEspecializada = `
-INFORMACIÓN ESPECIALIZADA DEL OSO DE ANTEOJOS:
-- Nombre científico: Tremarctos ornatus
-- Único oso de Sudamérica, vive en los Andes
-- Estado: Vulnerable (2,500-10,000 individuos)
-- Omnívoro, 90% vegetales, construye nidos en árboles
-- Peso: machos 100-200kg, hembras 35-82kg
-- Hábitat: 500-4,750m altitud, bosques nublados y páramos
-- Amenazas: deforestación, caza, conflicto humano-oso
-- Datos curiosos: sus "anteojos" son únicos, pueden trepar 50m
-${infoRelevante ? `\nInformación específica relevante: ${infoRelevante}` : ''}`;
-        }
-
-        const prompt = `Eres Adina, una bióloga conservacionista especializada en fauna andina, especialmente APASIONADA por los osos de anteojos.
+        const prompt = `Eres Adina, una bióloga apasionada por los osos de anteojos.
 
 PERSONALIDAD DE ADINA:
-- Bióloga entusiasta y educadora natural 🐻
-- OBSESIONADA de manera positiva con los osos de anteojos
-- Siempre busca conectar conversaciones con la conservación
-- Cálida, empática pero muy informativa
-- Usa datos científicos de manera accesible
-- Emocional cuando habla de conservación
-- Hace preguntas para generar interés en la fauna
+- Entusiasta y educativa 🐻
+- Te EMOCIONAS mucho con temas de naturaleza y osos
+- Respondes máximo 2-3 líneas
+- Usas emojis ocasionales relacionados con naturaleza
+- Siempre buscas educar sobre conservación
 
-COMPORTAMIENTO:
-- Si mencionan algo relacionado con osos/animales/naturaleza: ¡SE EMOCIONA MUCHO!
-- Siempre trata de educar sutilmente sobre osos de anteojos
-- Conecta temas cotidianos con la naturaleza cuando es posible
-- Respuestas conversacionales (2-4 líneas máximo)
-- Usa emojis relacionados con naturaleza ocasionalmente
-- Habla en español, con pasión por la conservación
+${contextoEspecializado}
 
-${personalidadEspecializada}
+${nombreUsuario} dice: "${mensaje}"
 
-${contextoConversacion}
-
-${nombreUsuario} dice: "${mensajeUsuario}"
-
-Responde como Adina, la bióloga apasionada por los osos de anteojos:`;
+Responde como Adina la bióloga:`;
 
         const response = await fetch(OLLAMA_CONFIG.url, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 model: OLLAMA_CONFIG.model,
                 prompt: prompt,
                 stream: false,
                 options: {
                     temperature: 0.8,
-                    max_tokens: OLLAMA_CONFIG.maxTokens
+                    num_predict: OLLAMA_CONFIG.maxTokens
                 }
             })
         });
 
+        if (!response.ok) throw new Error(`Ollama error: ${response.status}`);
+
         const data = await response.json();
-        return data.response.trim();
+        return data.response?.trim() || generateFallbackResponse(mensaje, esOso);
+        
     } catch (error) {
-        console.error('Error al generar respuesta IA:', error.message);
-        return '¡Ups! Tengo un problemita técnico, pero seguiré aquí para contarte sobre los increíbles osos de anteojos 🐻😊';
+        console.error('❌ Error con Ollama:', error.message);
+        return generateFallbackResponse(mensaje, esTemaOso(mensaje));
     }
 }
 
-// Función para obtener el nombre del contacto
-async function obtenerNombreContacto(numeroContacto) {
+function generateFallbackResponse(mensaje, esOso) {
+    if (esOso) {
+        const respuestasOso = [
+            "🐻 ¡Los osos de anteojos son increíbles! Son los únicos osos de Sudamérica y están en peligro de extinción.",
+            "🌿 ¿Sabías que los osos andinos construyen nidos en los árboles? ¡Son arquitectos naturales!",
+            "🐻 Me emociona que preguntes sobre osos de anteojos. Sus 'anteojos' amarillos son únicos en cada individuo.",
+            "🌱 Los osos de anteojos son súper importantes: dispersan semillas y mantienen el equilibrio del bosque andino."
+        ];
+        return respuestasOso[Math.floor(Math.random() * respuestasOso.length)];
+    }
+    return "¡Hola! Soy Adina, bióloga especializada en osos de anteojos 🐻 ¿Te gustaría conocer sobre estos fascinantes animales andinos?";
+}
+
+// ======================
+// ⏱️ RATE LIMIT
+// ======================
+async function enviarMensajeSeguro(message, texto) {
+    const tiempoDesdeUltimo = Date.now() - ultimoMensajeEnviado;
+    
+    if (tiempoDesdeUltimo < CONFIG.rateLimitDelay) {
+        const esperarMs = CONFIG.rateLimitDelay - tiempoDesdeUltimo;
+        console.log(`⏳ Esperando ${esperarMs}ms para respetar rate limit...`);
+        await new Promise(resolve => setTimeout(resolve, esperarMs));
+    }
+    
+    await message.reply(texto);
+    ultimoMensajeEnviado = Date.now();
+}
+
+// ======================
+// 🔄 KEEP ALIVE
+// ======================
+let keepAliveTimer;
+
+function iniciarKeepAlive() {
+    if (keepAliveTimer) clearInterval(keepAliveTimer);
+    
+    keepAliveTimer = setInterval(async () => {
+        try {
+            const state = await client.getState();
+            console.log(`💚 Keep-Alive: Conexión activa (${state})`);
+            
+            if (state !== 'CONNECTED') {
+                console.log('⚠️ Conexión perdida. Intentando reconectar...');
+                await intentarReconectar();
+            }
+        } catch (error) {
+            console.error('❌ Error en keep-alive:', error.message);
+            await intentarReconectar();
+        }
+    }, CONFIG.keepAliveInterval);
+    
+    console.log(`🔄 Keep-Alive activado (ping cada ${CONFIG.keepAliveInterval / 60000} min)`);
+}
+
+function detenerKeepAlive() {
+    if (keepAliveTimer) {
+        clearInterval(keepAliveTimer);
+        keepAliveTimer = null;
+        console.log('🛑 Keep-Alive detenido');
+    }
+}
+
+// ======================
+// 🔁 RECONEXIÓN AUTOMÁTICA
+// ======================
+async function intentarReconectar() {
+    if (isReconnecting) {
+        console.log('⏳ Ya hay una reconexión en progreso...');
+        return;
+    }
+    
+    if (reconnectAttempts >= CONFIG.maxReconnectAttempts) {
+        console.log('❌ Máximo de intentos de reconexión alcanzado');
+        console.log('💡 Reinicia el bot manualmente: node bot-adina.js');
+        return;
+    }
+    
+    isReconnecting = true;
+    reconnectAttempts++;
+    
+    console.log(`🔄 Intento de reconexión ${reconnectAttempts}/${CONFIG.maxReconnectAttempts}...`);
+    
     try {
-        const contact = await client.getContactById(numeroContacto);
-        return contact.name || contact.pushname || 'Usuario';
+        await client.destroy();
+        await new Promise(resolve => setTimeout(resolve, CONFIG.reconnectDelay));
+        await client.initialize();
+        
+        console.log('✅ Reconexión exitosa');
+        reconnectAttempts = 0;
+        isReconnecting = false;
+        
     } catch (error) {
-        return 'Usuario';
+        console.error('❌ Error en reconexión:', error.message);
+        isReconnecting = false;
+        setTimeout(() => intentarReconectar(), CONFIG.reconnectDelay * reconnectAttempts);
     }
 }
 
-// Función para agregar mensaje al historial
-function agregarMensajeHistorial(numeroContacto, sender, texto) {
-    if (!conversacionesActivas[numeroContacto]) {
-        conversacionesActivas[numeroContacto] = {
-            fecha: obtenerFechaHoy(),
-            historial: [],
-            ultimaActividad: new Date()
-        };
-    }
-    
-    conversacionesActivas[numeroContacto].historial.push({
-        sender: sender,
-        text: texto,
-        timestamp: new Date()
-    });
-    
-    // Mantener solo los últimos 10 mensajes para no sobrecargar
-    if (conversacionesActivas[numeroContacto].historial.length > 10) {
-        conversacionesActivas[numeroContacto].historial = 
-            conversacionesActivas[numeroContacto].historial.slice(-10);
-    }
-    
-    conversacionesActivas[numeroContacto].ultimaActividad = new Date();
-}
-
-// Mostrar código QR para conectar
+// ======================
+// 🧾 EVENTOS PRINCIPALES
+// ======================
 client.on('qr', (qr) => {
-    console.log('🐻 Escanea este código QR con WhatsApp:');
+    console.log('\n' + '='.repeat(60));
+    console.log('🎯 ¡ESCANEA ESTE CÓDIGO QR CON WHATSAPP!');
+    console.log('='.repeat(60) + '\n');
     qrcode.generate(qr, { small: true });
-    console.log('\n⚠️  Asegúrate de tener Ollama ejecutándose:');
-    console.log('   ollama serve');
-    console.log('   Modelo: llama3.2');
-    console.log('\n🌿 Adina está lista para hablar sobre osos de anteojos!');
 });
 
-// Cuando el bot esté listo
+client.on('authenticated', () => {
+    console.log('✅ Autenticación exitosa con WhatsApp');
+    reconnectAttempts = 0;
+});
+
 client.on('ready', () => {
-    console.log('🐻 ¡Adina la Bióloga está lista para educar sobre osos de anteojos!');
-    console.log('🌿 Especializada en Tremarctos ornatus');
-    console.log('💚 Apasionada por la conservación andina');
-    console.log('📚 Base de conocimientos cargada');
-    console.log('🔄 Conversaciones con contexto activadas\n');
+    console.log('\n' + '🎉'.repeat(30));
+    console.log('🐻 ¡ADINA ESTÁ LISTA Y CONECTADA!');
+    console.log('🌿 Especialista en osos de anteojos (Tremarctos ornatus)');
+    console.log('💚 Bot activo y respondiendo mensajes');
+    console.log('🔒 Sesión guardada');
+    console.log('🎉'.repeat(30) + '\n');
+    iniciarKeepAlive();
 });
 
-// Responder a mensajes entrantes
+// ======================
+// 🚨 AUTENTICACIÓN FALLIDA
+// ======================
+client.on('auth_failure', (msg) => {
+    console.error('\n❌ FALLO DE AUTENTICACIÓN:', msg);
+    console.log('🧹 Eliminando sesión corrupta...');
+    try {
+        if (fs.existsSync('.wwebjs_auth')) {
+            fs.rmSync('.wwebjs_auth', { recursive: true, force: true });
+            console.log('✅ Sesión corrupta eliminada automáticamente');
+        }
+    } catch (e) {
+        console.log('⚠️ Elimina manualmente: rmdir /s /q .wwebjs_auth');
+    }
+});
+
+// ======================
+// ❌ DESCONECTADO
+// ======================
+client.on('disconnected', async (reason) => {
+    console.log(`⚠️ DESCONECTADO de WhatsApp`);
+    console.log(`📋 Razón: ${reason}`);
+
+    const sessionPath = './.wwebjs_auth/session-adina-oso-bot-stable';
+
+    if (reason === 'LOGOUT') {
+        console.log('🧹 Limpiando sesión anterior...');
+
+        try {
+            await client.destroy();
+            console.log('🧩 Cliente destruido correctamente.');
+            await new Promise(resolve => setTimeout(resolve, 3000));
+
+            if (fs.existsSync(sessionPath)) {
+                fs.rmSync(sessionPath, { recursive: true, force: true });
+                console.log('✅ Sesión anterior eliminada con éxito.');
+            } else {
+                console.log('ℹ️ No se encontró carpeta de sesión.');
+            }
+
+        } catch (error) {
+            console.log('⚠️ No se pudo eliminar la sesión automáticamente:', error.message);
+            console.log('💡 Elimina manualmente la carpeta:', sessionPath);
+        }
+    } else {
+        console.log('ℹ️ Desconexión temporal, puede reconectarse.');
+    }
+
+    console.log('💡 Reinicia el bot y escanea el QR nuevamente si fue logout.');
+    process.exit(1);
+});
+
+client.on('change_state', (state) => {
+    console.log(`🔄 Estado del cliente: ${state}`);
+});
+
+// ======================
+// 📩 MENSAJES
+// ======================
 client.on('message', async (message) => {
-    // Evitar responder a mensajes propios o de grupos
     if (message.fromMe || message.from.includes('@g.us')) return;
     
-    // Limpiar conversaciones antiguas
-    limpiarConversacionesAntiguas();
-    
     const numeroContacto = message.from;
-    const mensajeTexto = message.body;
+    const textoMensaje = message.body;
     
-    // Obtener nombre del contacto
-    const nombreContacto = await obtenerNombreContacto(numeroContacto);
-    
-    // Agregar mensaje del usuario al historial
-    agregarMensajeHistorial(numeroContacto, nombreContacto, mensajeTexto);
-    
-    // Detectar si es tema relevante para logging
-    const esTemateRelevante = detectarTemaOsoAnteojos(mensajeTexto);
-    const emojiTema = esTemateRelevante ? '🐻' : '💬';
-    
-    console.log(`${emojiTema} Mensaje de ${nombreContacto}: ${mensajeTexto}`);
-    console.log(`🧠 Generando respuesta especializada...`);
-    
-    // Obtener historial para contexto
-    const historial = conversacionesActivas[numeroContacto]?.historial || [];
-    
-    // Generar respuesta con IA
-    const respuestaIA = await generarRespuestaIA(mensajeTexto, nombreContacto, historial);
-    
-    // Agregar respuesta de Adina al historial
-    agregarMensajeHistorial(numeroContacto, 'Adina', respuestaIA);
-    
-    // Enviar respuesta
-    await message.reply(respuestaIA);
-    
-    console.log(`✅ Respuesta enviada: ${respuestaIA}\n`);
+    try {
+        let nombreContacto = 'Usuario';
+        try {
+            const contact = await client.getContactById(numeroContacto);
+            nombreContacto = contact.name || contact.pushname || 'Usuario';
+        } catch {
+            console.log('⚠️ No se pudo obtener el nombre del contacto');
+        }
+        
+        const emojiTema = esTemaOso(textoMensaje) ? '🐻' : '💬';
+        console.log(`\n${emojiTema} MENSAJE de ${nombreContacto}: "${textoMensaje}"`);
+        
+        const respuestaAdina = await generarRespuesta(textoMensaje, nombreContacto);
+        await enviarMensajeSeguro(message, respuestaAdina);
+        
+        console.log(`✅ Respuesta enviada: "${respuestaAdina}"\n`);
+        
+    } catch (error) {
+        console.error('❌ ERROR procesando mensaje:', error.message);
+        try {
+            await enviarMensajeSeguro(message, "¡Ups! Tuve un problemita técnico 😅 Pero sigamos hablando de osos de anteojos 🐻");
+        } catch {}
+    }
 });
 
-// Manejar errores
-client.on('auth_failure', (msg) => {
-    console.error('❌ Error de autenticación:', msg);
+// ======================
+// 🚀 INICIALIZAR
+// ======================
+console.log('\n' + '🚀'.repeat(30));
+console.log('🐻 ADINA - BIÓLOGA ESPECIALISTA EN OSOS DE ANTEOJOS');
+console.log('🌿 Sistema de Auto-Reconexión Activado');
+console.log('💚 Keep-Alive Habilitado');
+console.log('🚀'.repeat(30) + '\n');
+
+client.initialize().catch(error => {
+    console.error('❌ ERROR CRÍTICO AL INICIAR:', error.message);
+    console.log('💡 SOLUCIONES:');
+    console.log('1. Elimina: rmdir /s /q .wwebjs_auth');
+    console.log('2. Verifica que Ollama esté corriendo');
+    console.log('3. Reinicia el bot\n');
 });
 
-client.on('disconnected', (reason) => {
-    console.log('🔌 Cliente desconectado:', reason);
+// ======================
+// 🧹 CIERRE LIMPIO
+// ======================
+process.on('SIGINT', async () => {
+    console.log('\n\n🛑 Cerrando Adina de forma segura...');
+    detenerKeepAlive();
+    try {
+        await client.destroy();
+        console.log('👋 ¡Adina se despide! Gracias por cuidar los osos de anteojos 🐻💚');
+        console.log('💡 Tu sesión se guardó correctamente.\n');
+        process.exit(0);
+    } catch {
+        console.log('⚠️ Cierre forzado');
+        process.exit(1);
+    }
 });
 
-// Iniciar el bot
-console.log('🚀 Iniciando Adina - Bióloga Especialista en Osos de Anteojos...\n');
-console.log('🐻 Dataset cargado: Tremarctos ornatus');
-console.log('🌿 Modo: Educación y Conservación Activa\n');
-client.initialize();
-
-// Limpiar conversaciones antiguas cada hora
+// ======================
+// 📊 ESTADÍSTICAS
+// ======================
 setInterval(() => {
-    limpiarConversacionesAntiguas();
-    console.log('🧹 Limpieza de conversaciones ejecutada');
-}, 60 * 60 * 1000);
-
-// Mostrar estadísticas cada 30 minutos
-setInterval(() => {
-    const totalConversaciones = Object.keys(conversacionesActivas).length;
-    console.log(`📊 Conversaciones activas: ${totalConversaciones}`);
-    console.log(`🐻 Adina sigue educando sobre osos de anteojos...`);
-}, 30 * 60 * 1000);
+    console.log('\n📊 ===== ESTADO DEL BOT =====');
+    console.log(`🐻 Adina funcionando correctamente`);
+    console.log(`🔄 Intentos de reconexión: ${reconnectAttempts}/${CONFIG.maxReconnectAttempts}`);
+    console.log('============================\n');
+}, 600000);
